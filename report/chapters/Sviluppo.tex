@@ -1,0 +1,169 @@
+\documentclass[main.tex]{subfiles}
+
+\usepackage{pythonhighlight}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\definecolor{mGreen}{rgb}{0,0.6,0}
+\definecolor{mGray}{rgb}{0.5,0.5,0.5}
+\definecolor{mPurple}{rgb}{0.58,0,0.82}
+\definecolor{backgroundColour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{CStyle}{
+    backgroundcolor=\color{backgroundColour},   
+    commentstyle=\color{mGreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{mGray},
+    stringstyle=\color{mPurple},
+    basicstyle=\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2,
+    language=C
+}
+
+\lstdefinestyle{yaml}{
+     backgroundcolor=\color{backgroundColour}, 
+     basicstyle=\color{blue}\footnotesize,
+     rulecolor=\color{black},
+     string=[s]{'}{'},
+     stringstyle=\color{blue},
+     comment=[l]{:},
+     numbers=left,
+     commentstyle=\color{black},
+     morecomment=[l]{-}
+ }
+
+\begin{document}
+\section{Sviluppo}\label{sec:sviluppo}
+
+\subsection{Binario}
+Come visto nella fase di reverse engineering, il codice sorgente non differisce poi molto dal suo equivalente decompilato né differisce dall'analisi già effettuata.\\
+
+main.c
+\begin{lstlisting}[style=CStyle]
+#include "bof.h"
+
+t_pin	get_pin()
+{
+    FILE	*urandom;
+    t_pin	pin;
+
+    urandom = fopen("/dev/urandom", "r");
+    if (urandom == NULL) {
+        printf("Failed to open /dev/urandom\n");
+        exit(1);
+    }
+    if (fread(pin.b, sizeof(char), 4, urandom) != 4) {
+        printf("Failed to read from /dev/urandom\n");
+        fclose(urandom);
+        exit(1);
+    }
+    fclose(urandom);
+    return (pin);
+}
+
+int	check_pin(u_int32_t pin)
+{
+    if (pin == get_pin().u)
+    {
+        puts("Access granted.\n");
+        system("/bin/sh");
+        return (0);
+    }
+    puts("Access denied.\n");
+    return (1);
+}
+
+int	main(void)
+{
+    char	user[64];
+    t_pin	password;
+
+    memset(user, 0, sizeof(user));
+    setvbuf(stdin, NULL, _IONBF, 0);
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
+    printf("Shoutout at the user of the day: user_%llx\n", main);
+    printf("Enter your username: ");
+    read(0, user, 0x64);
+    printf("Hello %s, what's your pin?\n", user);
+    read(0, password.b, 0x64);
+    check_pin(password.u);
+    return (0);
+}
+\end{lstlisting}
+
+bof.h
+\begin{lstlisting}[style=CStyle]
+#ifndef BOF_H
+# define BOF_H
+
+# include <stdio.h>
+# include <stdlib.h>
+
+typedef union s_pin {
+    u_int32_t   u;
+    char        b[4];
+}	t_pin;
+
+#endif
+\end{lstlisting}
+
+\subsection{Container}
+
+Ora serve rendere il binario un vero e propio servizio al quale si può accedere da remoto, qui entra in gioco Docker; per prima cosa creo un Dockerfile, dove poi inzio scegliendo come immagine di partenza un ubuntu:22.04, ci installo socat, che servirà, in questo caso, a rendere il binario un server; dopodiché aggiungo un utente da poi usare dentro il container, copio i file necessari (ovvero, il binario e una flag), espongo una porta da usare e avvio socat nell'entrypoint.
+
+\begin{python}
+FROM ubuntu:22.04
+
+RUN apt-get update && \
+	apt-get install -y socat
+
+RUN useradd -d /home/chall/ -m -p chall -s /bin/bash chall
+RUN echo "chall:chall" | chpasswd
+
+COPY ./remote_login /home/chall/remote
+COPY ./flag.txt /home/chall/flag.txt
+RUN chmod +x /home/chall/remote
+
+USER chall
+WORKDIR /home/chall
+
+EXPOSE 1337
+
+ENTRYPOINT ["socat","TCP-LISTEN:1337,reuseaddr,fork","EXEC:./remote"]
+\end{python}
+
+Ora ci manca solo l'ultimo passo per rendere tutto più semplice e comodo da deployare, cioè il compose; qui è riportata la semplice configurazione per build locale, con porta forwardata sulla 1337, e in particolare i limiti sulle risorse e il filesistem readonly per evitare che chi in futuro dovesse accedere a questa challenge di fare danni alla challenge stessa ne alla macchina sulla quale sta operando.
+
+\begin{lstlisting}[style=yaml]
+services:
+  remote_login:
+    build: ./remote
+    ports:
+      - 1337:1337
+    stdin_open: true
+    tty: true
+    read_only: true
+    deploy:
+      restart_policy:
+        condition: any
+        delay: 5s
+        window: 10s
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1000M
+\end{lstlisting}
+
+
+\end{document}
