@@ -1,0 +1,18 @@
+
+services:
+  remote_login:
+    build: ./remote
+    ports:
+      - 1337:1337
+    stdin_open: true
+    tty: true
+    read_only: true
+    deploy:
+      restart_policy:
+        condition: any
+        delay: 5s
+        window: 10s
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1000M
